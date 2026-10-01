@@ -2,12 +2,13 @@
 
 Date: October 1, 2026. Linux; Chromium 152.0.7977.82; Codex CLI 0.158.0.
 
-- `npm run check` passed: TypeScript, all 16 regression tests, and bundled builds.
+- `npm run check` passed: TypeScript, bundled builds, and all 16 regression tests. The build runs before tests because the manager transport test uses the actual bundled relay.
 - Disk persistence tests restart the workspace, export and restore complete source history/conversation, detect corrupt revision checksums, and reject invalid paths/source before creating a project.
 - Controller tests check external-edit conflicts, exact readback failures, restoring a draft without changing installed code, and immutable localhost install artifacts.
 - Native messaging tests cover fragmented input and large Unicode responses below Chrome's per-frame size limit.
 - Codex transport tests use a subprocess fixture to cover client inspection, thread resume, and cancellation.
 - The actual bundled official Tampermonkey MCP process is paired to a simulated Editors WebSocket in the manager test. It exercises list/get/patch and timestamp conflict responses. This does **not** verify the live Tampermonkey+Editors browser combination.
+- The standalone release ZIP was extracted outside the source repository and connected successfully without project `node_modules`.
 - The built extension was loaded in an isolated Chromium profile and its sidebar visually inspected. A native-host registration in that temporary profile connected successfully to the real companion and existing Codex login. The normal browser profile was not modified.
 - `SCRIPT_MONKEY_MODEL=gpt-5.5 npm run smoke:codex` completed a real inference using the existing Codex account, called the dynamic inspection tool, and generated the nested-menu shortcut. The initial CLI-configured model was unsupported with its authentication mode; model selection now provides an override without changing global configuration.
 
