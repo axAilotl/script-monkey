@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { mkdir, writeFile, readFile, unlink, access } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { resolve, join } from 'node:path';
+import { resolve, join, dirname } from 'node:path';
 import { constants } from 'node:fs';
 import { delimiter } from 'node:path';
 import { homedir } from 'node:os';
@@ -48,7 +48,8 @@ if (!codex) {
     try { await access(candidate, constants.X_OK); codex = resolve(candidate); break; } catch {}
   }
 }
-const environment = codex ? `export SCRIPT_MONKEY_CODEX=${quote(codex)}\n` : '';
+// Codex's npm launcher uses /usr/bin/env node; graphical Chrome may not inherit mise/nvm PATH.
+const environment = `export PATH=${quote(dirname(process.execPath))}:"$PATH"\n` + (codex ? `export SCRIPT_MONKEY_CODEX=${quote(codex)}\n` : '');
 await writeFile(launcher, `#!/bin/sh\n${environment}exec ${quote(process.execPath)} ${quote(join(root, 'dist/companion/host.mjs'))} --workspace ${quote(workspace)} "$@"\n`, { mode: 0o700 });
 await writeFile(manifestFile, JSON.stringify({ name: 'io.github.script_monkey', description: 'Script Monkey local companion', path: launcher, type: 'stdio', allowed_origins: [`chrome-extension://${id}/`] }, null, 2), { mode: 0o600 });
 console.log(`Registered Script Monkey for ${browser}.\nExtension ID: ${id}\nProject folder: ${workspace}\nLoad unpacked extension: ${join(root, 'dist/extension')}\nKeep this installation folder in place; the native host runs from it.`);

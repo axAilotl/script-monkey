@@ -16,9 +16,8 @@ test('installer finds terminal Codex and native helper uses it with a restricted
   const launcher = join(root, 'launch.sh');
   await run(process.execPath, ['scripts/setup.mjs', '--host-dir', join(root, 'hosts'), '--launcher', launcher, '--workspace', join(root, 'workspace')], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
   assert.ok((await readFile(launcher, 'utf8')).includes(join(bin, 'codex')));
-  // Keep node for the subprocess fixture's shebang, but remove the CLI's bin directory.
-  const nodePath = process.execPath.slice(0, process.execPath.lastIndexOf('/'));
-  const host = spawn(launcher, [], { env: { ...process.env, PATH: `${nodePath}:/usr/bin:/bin` }, stdio: 'pipe' });
+  // Neither the terminal's Node nor Codex installation is supplied in the browser PATH.
+  const host = spawn(launcher, [], { env: { ...process.env, PATH: '/usr/bin:/bin', SCRIPT_MONKEY_EXPECT_NODE: process.execPath }, stdio: 'pipe' });
   t.after(() => host.kill());
   const result = new Promise<any>((resolve, reject) => {
     const decoder = new NativeDecoder(); decoder.on('message', resolve);

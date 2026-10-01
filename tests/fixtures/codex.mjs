@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createInterface } from 'node:readline';
+if (process.env.SCRIPT_MONKEY_EXPECT_NODE && process.execPath !== process.env.SCRIPT_MONKEY_EXPECT_NODE) throw new Error('Browser PATH selected the wrong Node installation');
 const send = value => process.stdout.write(JSON.stringify(value) + '\n');
 let thread = 'script-monkey-test-thread', hold = false;
 let currentSource;
