@@ -6,6 +6,7 @@
   <main>
     <section class="context"><div class="eyebrow">CURRENT WEBSITE</div><div class="site-line"><strong id="site">Open a website</strong><button id="inspect" class="quiet">Inspect</button></div><small id="page-status">Page content is shared with your Codex when you ask for a change.</small></section>
     <details id="connection"><summary>Local connection</summary><p id="connection-status">No Script Monkey account. Uses your installed Codex CLI.</p><button id="pair">Pair Tampermonkey</button><pre id="pair-code"></pre><p class="muted">Enter the code in Tampermonkey Editors, then open the script library. Violentmonkey works through imported files and its external-edit tracking.</p></details>
+    <p id="recovery-warning" role="alert" class="hidden"></p>
     <label for="model" class="muted">Codex model</label><select id="model" aria-label="Codex model"><option value="">Use CLI configuration</option></select>
     <nav aria-label="Workspace"><button data-view="chat" class="active">Build</button><button data-view="library">Scripts</button><button data-view="history">History</button></nav>
     <section id="chat" class="view">

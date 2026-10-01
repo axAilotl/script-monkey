@@ -20,7 +20,7 @@ if (args.includes('--help')) {
 if (!['linux', 'darwin'].includes(process.platform)) throw new Error('Automatic native-host setup supports Linux and macOS in this version.');
 if (!browserDirs[browser]) throw new Error(`Unknown browser: ${browser}`);
 const hostDir = resolve(option('--host-dir', join(homedir(), browserDirs[browser], 'NativeMessagingHosts')));
-const launcher = join(root, '.script-monkey-host.sh');
+const launcher = resolve(option('--launcher', join(root, '.script-monkey-host.sh')));
 const manifestFile = join(hostDir, 'io.github.script_monkey.json');
 if (args.includes('--remove')) {
   const installed = JSON.parse(await readFile(manifestFile, 'utf8'));

@@ -1,7 +1,7 @@
 import { MAX_SOURCE } from './model.js';
 
 export function metadata(source: string): Record<string, string[]> {
-  const block = source.match(/\/\/ ==UserScript==([\s\S]*?)\/\/ ==\/UserScript==/);
+  const block = source.match(/\/\/\s*==UserScript==([\s\S]*?)\/\/\s*==\/UserScript==/);
   if (!block) throw new Error('A userscript needs a // ==UserScript== metadata block.');
   const result: Record<string, string[]> = {};
   for (const line of block[1]!.split('\n')) {
@@ -14,7 +14,7 @@ export function metadata(source: string): Record<string, string[]> {
 export function validateSource(source: string): void {
   if (!source || source.length > MAX_SOURCE) throw new Error('Script is empty or exceeds 240 KB.');
   const meta = metadata(source);
-  if (!meta.name?.[0] || !meta.namespace?.[0]) throw new Error('Script needs @name and @namespace.');
+  if (!meta.name?.[0]) throw new Error('Script needs @name.');
   if (!meta.match?.length && !meta.include?.length) throw new Error('Script needs @match or @include.');
 }
 
@@ -24,13 +24,14 @@ export function siteOrigin(url: string): string {
   return parsed.origin;
 }
 
-export function template(origin: string, name: string): string {
+export function template(origin: string, name: string, namespace = 'script-monkey.local'): string {
   const url = new URL(siteOrigin(origin));
   const safeName = name.replace(/[\r\n]/g, ' ').trim();
-  return `// ==UserScript==\n// @name         ${safeName}\n// @namespace    script-monkey.local\n// @version      0.1.0\n// @description  Personal website customization\n// @match        ${url.origin}/*\n// @grant        none\n// @run-at       document-idle\n// ==/UserScript==\n\n(() => {\n  'use strict';\n  // Describe your change in the sidebar.\n})();\n`;
+  const scope = url.port ? `// @include      ${url.origin}/*` : `// @match        ${url.origin}/*`;
+  return `// ==UserScript==\n// @name         ${safeName}\n// @namespace    ${namespace}\n// @version      0.1.0\n// @description  Personal website customization\n${scope}\n// @grant        none\n// @run-at       document-idle\n// ==/UserScript==\n\n(() => {\n  'use strict';\n  // Describe your change in the sidebar.\n})();\n`;
 }
 
 export function sameIdentity(first: string, second: string): boolean {
   const a = metadata(first), b = metadata(second);
-  return a.name?.[0] === b.name?.[0] && a.namespace?.[0] === b.namespace?.[0];
+  return a.name?.[0] === b.name?.[0] && (a.namespace?.[0] ?? '') === (b.namespace?.[0] ?? '');
 }

@@ -6,6 +6,11 @@ let view: ProjectView | undefined;
 let captured: { page: Page; tabId: number; documentId: string } | undefined;
 let busy = false;
 let fileMode: 'script' | 'backup' = 'script';
+let libraryWarnings: string[] = [];
+function recoveryWarnings(warnings: string[] = []) {
+  $('recovery-warning').textContent = [...libraryWarnings, ...warnings].join('\n');
+  $('recovery-warning').classList.toggle('hidden', !$('recovery-warning').textContent);
+}
 function notice(text: string, error = false) { $('notice').textContent = text; $('notice').classList.toggle('error', error); }
 async function message<T>(value: unknown): Promise<T> {
   const reply = await chrome.runtime.sendMessage(value);
@@ -75,12 +80,13 @@ function changes(before: string, after: string): string {
 }
 function render(value: ProjectView) {
   view = value;
+  recoveryWarnings(value.warnings);
   $<HTMLSelectElement>('projects').value = view.project.id;
   const current = revision();
   $<HTMLTextAreaElement>('source').value = current.source;
   $<HTMLDetailsElement>('draft').open = true;
   const meta = metadata(current.source);
-  $('script-meta').textContent = `Sites: ${[...(meta.match ?? []), ...(meta.include ?? [])].join(', ')}\nGrants: ${(meta.grant ?? ['none']).join(', ')}${meta.updateURL || meta.downloadURL ? '\nThis script has an upstream update URL. Manager updates can replace personal edits.' : ''}`;
+  $('script-meta').textContent = `Sites: ${[...(meta.match ?? []), ...(meta.include ?? [])].join(', ')}\nGrants: ${(meta.grant ?? ['unspecified (manager default)']).join(', ')}${meta.updateURL || meta.downloadURL ? '\nThis script has an upstream update URL. Manager updates can replace personal edits.' : ''}`;
   const previous = view.revisions.filter(item => item.id !== current.id)[0];
   $('diff').textContent = changes(view.project.manager?.source ?? previous?.source ?? '', current.source);
   $('apply').toggleAttribute('disabled', !view.project.manager || busy);
@@ -113,7 +119,8 @@ function setBusy(value: boolean) {
 }
 on('connect', async () => {
   notice('Connecting to your machine…');
-  const status = await request<{ workspace: string; codex: any }>({ method: 'status' });
+  const status = await request<{ workspace: string; codex: any; warnings: string[] }>({ method: 'status' });
+  libraryWarnings = status.warnings; recoveryWarnings(view?.warnings);
   $('workspace').textContent = status.workspace;
   const models = $<HTMLSelectElement>('model');
   models.replaceChildren(new Option('Use CLI configuration', ''));

@@ -20,6 +20,7 @@ const backupSchema = z.object({
 /** Files, rather than the browser profile, are the authoritative project record. */
 export class Workspace {
   readonly root: string;
+  warnings: string[] = [];
   constructor(root: string) { this.root = resolve(root); }
   private directory(id: string) { return join(this.root, 'projects', uuid.parse(id)); }
   private async atomic(path: string, value: unknown) {
@@ -30,11 +31,12 @@ export class Workspace {
     await rename(tmp, path);
   }
   async create(origin: string, name: string, source?: string, manager?: ManagerBinding): Promise<ProjectView> {
-    validateSource(source ?? template(origin, name));
     const project: Project = { schemaVersion: 1, id: randomUUID(), origin: siteOrigin(origin), name, createdAt: now(), ...(manager ? { manager } : {}) };
+    source ??= template(origin, name, `script-monkey.local/${project.id}`);
+    validateSource(source);
     await mkdir(join(this.directory(project.id), 'revisions'), { recursive: true, mode: 0o700 });
     await this.atomic(join(this.directory(project.id), 'project.json'), project);
-    return this.save(project.id, source ?? template(origin, name), manager ? 'Original imported from Tampermonkey' : 'Initial script');
+    return this.save(project.id, source, manager ? 'Original imported from Tampermonkey' : 'Initial script');
   }
   async project(id: string): Promise<Project> {
     const value = JSON.parse(await readFile(join(this.directory(id), 'project.json'), 'utf8')) as Project;
@@ -67,26 +69,43 @@ export class Workspace {
   async view(id: string): Promise<ProjectView> {
     const project = await this.project(id);
     const names = await readdir(join(this.directory(id), 'revisions'));
-    const revisions = await Promise.all(names.filter(name => name.endsWith('.json')).map(name => this.revision(id, name.slice(0, -5))));
+    const warnings: string[] = [];
+    const revisions: Revision[] = [];
+    for (const name of names.filter(name => name.endsWith('.json'))) {
+      try { revisions.push(await this.revision(id, name.slice(0, -5))); }
+      catch (error) {
+        if (name === `${project.currentRevisionId}.json`) throw error;
+        warnings.push(`Damaged historical revision ${name} was skipped. Its file remains on disk.`);
+      }
+    }
+    if (!revisions.some(revision => revision.id === project.currentRevisionId)) throw new Error('The current source revision is missing. Preserve this project folder and restore a backup.');
     let events: Event[] = [];
     try {
       const lines = (await readFile(join(this.directory(id), 'conversation.jsonl'), 'utf8')).split('\n');
       events = lines.flatMap(line => { try { return line ? [JSON.parse(line) as Event] : []; } catch { return []; } });
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     revisions.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    return { project, revisions, events };
+    return { project, revisions, events, ...(warnings.length ? { warnings } : {}) };
   }
   async list(): Promise<Project[]> {
     const dir = join(this.root, 'projects');
     await mkdir(dir, { recursive: true, mode: 0o700 });
     const names = await readdir(dir);
-    const projects = await Promise.all(names.filter(name => uuid.safeParse(name).success).map(name => this.project(name)));
+    this.warnings = [];
+    const projects: Project[] = [];
+    for (const name of names.filter(name => uuid.safeParse(name).success)) {
+      try { projects.push(await this.project(name)); }
+      catch { this.warnings.push(`Project ${name} has an invalid or missing record and was skipped. Its folder remains on disk.`); }
+    }
     return projects.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
   async backup(id: string) {
-    const { project, revisions, events } = await this.view(id);
+    const { project, revisions, events, warnings } = await this.view(id);
+    if (warnings?.length) throw new Error('Some historical revisions are damaged. Copy the project folder on disk to preserve all files before repairing or exporting.');
     // A restored project gets a new identity and is not automatically bound to an old manager installation.
-    return { format: 'script-monkey', version: 1, project: { name: project.name, origin: project.origin, currentRevisionId: project.currentRevisionId }, revisions, events };
+    const backup = { format: 'script-monkey', version: 1, project: { name: project.name, origin: project.origin, currentRevisionId: project.currentRevisionId }, revisions, events };
+    if (!backupSchema.safeParse(backup).success || Buffer.byteLength(JSON.stringify(backup, null, 2)) > 32 * 1024 * 1024) throw new Error('This project exceeds the portable backup limit (32 MB, 1,000 revisions, or 5,000 events). Copy its project folder on disk to preserve the complete history.');
+    return backup;
   }
   async restore(backup: unknown): Promise<ProjectView> {
     const value = backupSchema.parse(backup);

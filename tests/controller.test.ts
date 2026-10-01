@@ -73,3 +73,13 @@ test('restore keeps installed state intact until explicitly applied; install han
   });
   assert.equal(hostRejected, 404);
 });
+
+test('a failed conversation write releases the generation gate', async t => {
+  const { controller, store, project } = await setup(t);
+  const original = store.event.bind(store);
+  store.event = async () => { throw new Error('Disk write failed'); };
+  await assert.rejects(() => controller.handle({ method: 'generate', projectId: project.project.id, prompt: 'Add a shortcut', page: { url: 'https://example.com', title: 'Example', text: '', html: '', selectors: [] } }), /Disk write failed/);
+  store.event = original;
+  const next = await controller.handle({ method: 'save', projectId: project.project.id, source: project.revisions[0]!.source, note: 'Retry after recovery' }) as ProjectView;
+  assert.equal(next.revisions.length, 2);
+});

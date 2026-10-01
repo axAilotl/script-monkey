@@ -19,23 +19,32 @@ const server = createServer((request, response) => {
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const origin = `http://127.0.0.1:${server.address().port}`;
-source = (await readFile('artifacts/codex-smoke.user.js', 'utf8')).replaceAll('https://example.com/*', `${origin}/*`);
-const context = await chromium.launchPersistentContext(profile, {
-  headless: true, executablePath: process.env.SCRIPT_MONKEY_CHROMIUM ?? '/usr/bin/chromium',
+source = (await readFile('artifacts/codex-smoke.user.js', 'utf8')).replace(/\/\/ @match\s+https:\/\/example\.com\/\*/, `// @include ${origin}/*`);
+const launch = () => chromium.launchPersistentContext(profile, {
+  headless: process.env.SCRIPT_MONKEY_HEADLESS === '1', executablePath: process.env.SCRIPT_MONKEY_CHROMIUM ?? '/usr/bin/chromium',
   args: ['--no-sandbox', `--disable-extensions-except=${resolve(managerPath)}`, `--load-extension=${resolve(managerPath)}`],
 });
+let context = await launch();
 try {
-  const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
+  let worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
   const managerId = new URL(worker.url()).host;
   const settings = await context.newPage();
   await settings.goto(`chrome://extensions/?id=${managerId}`);
   const toggle = settings.getByRole('button', { name: /^Allow User Scripts/ });
   await toggle.waitFor();
   if (await toggle.getAttribute('aria-pressed') !== 'true') await toggle.click();
+  await context.close();
+  context = await launch();
+  worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
+  const popup = await context.newPage();
+  await popup.goto(`chrome-extension://${managerId}/popup/index.html`);
+
+  await popup.waitForFunction(async () => (await chrome.userScripts.getScripts()).length > 0);
   const installer = await context.newPage();
   await installer.goto(`${origin}/shortcut.user.js`).catch(() => {});
   await installer.waitForURL('chrome-extension://*/confirm/index.html*');
-  await installer.getByRole('button', { name: 'Install', exact: true }).click();
+  await installer.getByText('Install', { exact: true }).click();
+  await installer.locator('.status').filter({ hasText: 'installed' }).waitFor();
   const page = await context.newPage();
   await page.goto(origin);
   await page.locator('#script-monkey-shortcut').waitFor({ timeout: 15_000 });

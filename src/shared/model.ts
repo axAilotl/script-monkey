@@ -40,6 +40,6 @@ export type Project = {
   currentRevisionId?: string; appliedRevisionId?: string; threadId?: string;
   manager?: ManagerBinding;
 };
-export type ProjectView = { project: Project; revisions: Revision[]; events: Event[] };
+export type ProjectView = { project: Project; revisions: Revision[]; events: Event[]; warnings?: string[] };
 export type HostEvent = { event: 'progress'; text: string } | { event: 'inspect'; callId: string; selector: string; url: string };
 export type Reply = { id: string; result?: unknown; error?: string } | HostEvent;

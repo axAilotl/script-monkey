@@ -46,3 +46,38 @@ test('invalid source and filesystem traversal do not create usable projects', as
   await assert.rejects(() => store.project('../../elsewhere'));
   await assert.rejects(() => store.create('file:///etc/passwd', 'Invalid origin'));
 });
+
+test('new projects have distinct manager identities and localhost port scopes remain valid', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'script-monkey-identities-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const store = new Workspace(root);
+  const a = await store.create('https://example.com', 'My website shortcut');
+  const b = await store.create('https://another.example', 'My website shortcut');
+  assert.notEqual(a.revisions[0]!.source.match(/@namespace\s+(.*)/)?.[1], b.revisions[0]!.source.match(/@namespace\s+(.*)/)?.[1]);
+  const local = await store.create('http://localhost:4567', 'Local shortcut');
+  assert.match(local.revisions[0]!.source, /@include\s+http:\/\/localhost:4567\/\*/);
+});
+
+test('orphan projects and corrupt historical revisions do not block intact data', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'script-monkey-partial-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const store = new Workspace(root), first = await store.create('https://example.com', 'Test');
+  await store.save(first.project.id, first.revisions[0]!.source.replace('0.1.0', '0.2.0'), 'Change');
+  await writeFile(join(root, 'projects', first.project.id, 'revisions', `${first.revisions[0]!.id}.json`), 'damaged');
+  const { mkdir } = await import('node:fs/promises');
+  await mkdir(join(root, 'projects', crypto.randomUUID()));
+  const projects = await store.list();
+  assert.equal(projects.length, 1); assert.equal(store.warnings.length, 1);
+  const view = await store.view(first.project.id);
+  assert.equal(view.revisions.length, 1); assert.equal(view.warnings?.length, 1);
+  await assert.rejects(() => store.backup(first.project.id), /damaged/);
+});
+
+test('an oversized history cannot export a falsely restorable portable backup', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'script-monkey-large-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const store = new Workspace(root), view = await store.create('https://example.com', 'Test');
+  const line = JSON.stringify({ at: new Date().toISOString(), type: 'check', text: 'A test observation' }) + '\n';
+  await writeFile(join(root, 'projects', view.project.id, 'conversation.jsonl'), line.repeat(5001));
+  await assert.rejects(() => store.backup(view.project.id), /Copy its project folder/);
+});

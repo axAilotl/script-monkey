@@ -54,7 +54,7 @@ projects/<project-id>/
 
 Deleting browser storage does not delete these files. **History → Export project** backs up source history and conversation. **Scripts → Restore project backup** makes a fresh project without reusing the old manager binding or Codex thread. Backups exclude Codex authentication files, but preserve user-authored source and notes as supplied.
 
-Restoration creates a draft; apply/install it to change installed code. Upstream script updates may replace personal edits. Use one active companion session per workspace; disconnect before opening that workspace in another browser.
+Restoration creates a draft; apply/install it to change installed code. Upstream script updates may replace personal edits. Use one active companion session per workspace; disconnect before opening that workspace in another browser. Portable backups are limited to 32 MB, 1,000 revisions, and 5,000 events. For larger projects, copy the complete project folder. Damaged historical records remain on disk and are reported while intact source remains accessible.
 
 ## Development
 
@@ -65,7 +65,7 @@ npm run setup -- --browser chromium
 npm run package
 ```
 
-The package ZIP includes bundled companion dependencies and third-party notices. The opt-in `npm run smoke:codex` uses your existing Codex login for one real inference; `SCRIPT_MONKEY_MODEL` selects a model. `SCRIPT_MONKEY_CODEX` selects an executable.
+The package ZIP includes bundled companion dependencies and third-party notices. `node scripts/smoke-native.mjs` checks the extension/native-host connection in a temporary profile. The opt-in `npm run smoke:codex` uses your existing Codex login for one real inference; `SCRIPT_MONKEY_MODEL` selects a model. `SCRIPT_MONKEY_CODEX` selects an executable.
 
 This first version uses bounded DOM inspection and manual behavior checks. Click recording, screenshots, automatic browser interaction, API-key providers, Windows setup, and automatic Violentmonkey library access are not implemented. Codex dynamic tools use an experimental protocol.
 

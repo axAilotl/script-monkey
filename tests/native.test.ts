@@ -31,3 +31,11 @@ test('MCP source normalization strips only its final timestamp trailer', () => {
   assert.equal(result.lastModified, 1790856000000);
   assert.throws(() => parseManagerSource('{"number":405,"message":"Not allowed"}'), /did not return source/);
 });
+
+test('ordinary manager scripts may omit a namespace without losing their identity', async () => {
+  const { validateSource, sameIdentity } = await import('../src/shared/userscript.js');
+  const script = '//==UserScript==\n// @name Shortcut\n// @match https://example.com/*\n//==/UserScript==\n';
+  assert.doesNotThrow(() => validateSource(script));
+  assert.equal(sameIdentity(script, script.replace('@name Shortcut', '@name Other')), false);
+  assert.equal(sameIdentity(script, script.replace('@name Shortcut', '@namespace \n// @name Shortcut')), true);
+});

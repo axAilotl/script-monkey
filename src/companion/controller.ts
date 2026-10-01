@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
 import { createServer, type Server } from 'node:http';
-import type { HostEvent, ManagerSource, Page, Request } from '../shared/model.js';
+import type { HostEvent, Page, Request } from '../shared/model.js';
 import { metadata, sameIdentity, siteOrigin, validateSource } from '../shared/userscript.js';
 import { Workspace, hash } from './store.js';
 import { Tampermonkey } from './manager.js';
@@ -70,11 +69,15 @@ export class Controller {
         await this.store.list();
         let codex: unknown;
         try { codex = await this.agent.account(); } catch (error) { codex = { error: String(error) }; }
-        return { workspace: this.store.root, codex, generating: this.generating, manager: 'Tampermonkey via its official Editors bridge; Violentmonkey via file handoff' };
+        return { workspace: this.store.root, codex, warnings: this.store.warnings, generating: this.generating, manager: 'Tampermonkey via its official Editors bridge; Violentmonkey via file handoff' };
       }
       case 'pair': return { code: await this.manager.pair() };
       case 'manager-list': return this.manager.list();
-      case 'projects': return this.store.list();
+      case 'projects': {
+        const projects = await this.store.list();
+        if (this.store.warnings.length) this.emit({ event: 'progress', text: this.store.warnings.join('\n') });
+        return projects;
+      }
       case 'project': return this.store.view(request.projectId);
       case 'create': return this.store.create(request.origin, request.name, request.source);
       case 'manager-import': {
@@ -93,8 +96,8 @@ export class Controller {
         if (siteOrigin(request.page.url) !== project.origin) throw new Error('This project belongs to another website. Select a matching project.');
         const revision = await this.store.revision(project.id, project.currentRevisionId!);
         this.generating = true; this.pageUrl = request.page.url;
-        await this.store.event(project.id, 'user', request.prompt);
         try {
+          await this.store.event(project.id, 'user', request.prompt);
           const result = await this.agent.generate(project, request.prompt, request.page, revision.source, async threadId => this.store.update({ ...await this.store.project(project.id), threadId }), request.model);
           validateSource(result.source);
           if (project.manager && !sameIdentity(project.manager.source, result.source)) throw new Error('Codex changed the installed script identity. Save a personal fork instead of overwriting it.');
@@ -119,7 +122,7 @@ export class Controller {
         const project = await this.store.project(request.projectId);
         const revision = await this.store.revision(project.id, request.revisionId);
         const meta = metadata(revision.source);
-        const matches = (await this.manager.list()).filter(item => item.name === meta.name?.[0] && item.namespace === meta.namespace?.[0]);
+        const matches = (await this.manager.list()).filter(item => item.name === meta.name?.[0] && item.namespace === (meta.namespace?.[0] ?? ''));
         if (matches.length !== 1) throw new Error('Could not identify exactly one installed script. Check @name/@namespace and complete the manager install screen.');
         return this.checkReadback(project.id, revision.id, matches[0]!.path, revision.source);
       }
