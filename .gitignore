@@ -1,0 +1,7 @@
+node_modules/
+dist/
+artifacts/
+.cache/
+*.log
+.DS_Store
+.script-monkey-host.sh

@@ -1,6 +1,6 @@
 # Script Monkey: first-version plan
 
-Planning date: 2026-10-01. This document describes proposed work; no extension, companion, or integration has been implemented or tested in a browser.
+Planning date: 2026-10-01. This original design is retained for context. See [product scope](product-scope.md) and [README](../README.md) for the implemented release. Optional ideas below are not shipped-feature claims.
 
 ## Product and first milestone
 
@@ -114,7 +114,7 @@ Provider endpoint permissions and page scope are granted as needed. The sidebar 
 
 Ship the inspector and UI as packaged extension code. Generated userscripts are handed to the existing manager for execution. Do not evaluate generated strings as ordinary extension code. Chrome's Manifest V3 policy restricts remote-code execution and documents specific exceptions, including the User Scripts API. [MV3 policy](https://developer.chrome.com/docs/webstore/program-policies/mv3-requirements)
 
-If a built-in preview executor is proposed later, it needs its own userScripts permission, site permissions, and the appropriate user toggle. That API returns scripts registered by the calling extension; it does not read another manager's library. This is a separate design choice, not a workaround for missing manager access. [User Scripts API](https://developer.chrome.com/docs/extensions/reference/api/userScripts)
+The user clarified that Script Monkey must remain a companion for existing managers. A built-in userscript executor is outside product scope. [User Scripts API](https://developer.chrome.com/docs/extensions/reference/api/userScripts)
 
 Treat Chrome Web Store approval as unproven until reviewed. Plan an unpacked development build first. Onboarding must accurately cover the companion, Editors pairing, manager permissions, and version-dependent features.
 
@@ -149,4 +149,4 @@ Phase 1 is deliberately small: validate interoperability before building a polis
 - Minimum Chrome version, initial OS packaging target, and companion installation experience.
 - Behavior for cross-origin frames, single-page navigation, and scripts changed externally while the agent drafts.
 
-These are future feasibility checks. No software has been installed, browser profile modified, or application code written as part of this planning pass.
+These were original planning questions. See [validation](validation.md) for completed checks and remaining limits.
