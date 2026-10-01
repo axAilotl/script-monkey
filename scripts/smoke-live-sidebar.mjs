@@ -24,10 +24,12 @@ try {
     document.getElementById('prompt').value = 'Use inspect_page to inspect the live page. Add one top-right button with id script-monkey-shortcut. Clicking it should click #more and then #export-open once it is visible. Keep setup idempotent, preserve name/namespace and the existing @include for this localhost port. No external requests.';
     document.getElementById('prompt-form').requestSubmit();
   });
-  await sidebar.waitForFunction(() => document.getElementById('notice').textContent.includes('Draft saved. Review') || document.getElementById('notice').classList.contains('error'), undefined, { timeout: 180_000 });
+  await sidebar.waitForFunction(() => document.getElementById('notice').textContent.includes('Draft saved') || document.getElementById('notice').classList.contains('error'), undefined, { timeout: 180_000 });
   assert.match(await sidebar.locator('#notice').textContent(), /Draft saved/, `Live UI task failed: ${await sidebar.locator('#notice').textContent()}`);
   const source = await sidebar.locator('#source').inputValue();
   assert.match(source, /script-monkey-shortcut/);
+  assert.match(await sidebar.locator('#conversation').textContent(), /Read .*(controls|Export)/s, 'Real page inspection activity was not relayed');
+  assert.match(await sidebar.locator('.activity.source pre').textContent(), /script-monkey-shortcut/, 'Real generated source was not relayed');
   await mkdir('artifacts', { recursive: true });
   const { writeFile } = await import('node:fs/promises');
   await writeFile('artifacts/sidebar-live.user.js', source);

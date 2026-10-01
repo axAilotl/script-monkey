@@ -34,3 +34,11 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.65 ui-monospa
 .hint { flex: none; font-size: 11px; color: var(--muted); background: var(--panel); border-radius: 7px; padding: 8px; } .text-button { border: 0; color: var(--accent); background: transparent; padding: 0 2px; font-size: inherit; }
 #notice { flex: none; padding: 0 12px 8px; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; max-height: 84px; overflow: auto; } #notice:empty { padding: 0; } #notice.error, #recovery-warning { color: #efb19d; } #recovery-warning { padding: 4px 12px; font-size: 11px; max-height: 64px; overflow: auto; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+.activity { background: var(--panel); }
+.activity .role::after { content: attr(data-state); float: right; }
+.activity.failed { border-color: #a96751; }
+.activity.source summary { font-size: 11px; }
+.activity pre { max-height: 180px; overflow: auto; margin: 6px 0 0; white-space: pre; color: var(--text); }
+#delivery strong, #delivery small { display: block; }
+#delivery .actions { margin: 6px 0 0; }
+#delivery .actions button { padding: 5px 8px; }

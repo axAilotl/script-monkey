@@ -1,4 +1,4 @@
-import type { ManagerScript, Page, Project, ProjectView, Request, Revision } from '../shared/model.js';
+import type { AgentActivity, ManagerScript, Page, Project, ProjectView, Request, Revision } from '../shared/model.js';
 import { metadata, siteOrigin } from '../shared/userscript.js';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id)! as T;
@@ -14,6 +14,10 @@ let checkingSetup: Promise<boolean> | undefined;
 let windowId: number | undefined;
 let pageVersion = 0;
 const projectTargets = new Map<string, number>();
+const activityElements = new Map<string, HTMLElement>();
+let liveProjectId: string | undefined;
+let liveSource: AgentActivity | undefined;
+const installHandoffs = new Set<string>();
 type PageContext = { tabId: number; url: string; title: string; supported: boolean; reason?: string };
 const isMissingHelper = (error: unknown) => /native messaging host.*not found|specified native messaging|access to the specified native messaging host|disconnected port/i.test(String(error));
 function failed(error: unknown) {
@@ -36,7 +40,7 @@ function missingHelper(error: unknown) {
 }
 function setupCommand() {
   const browser = $<HTMLSelectElement>('browser').value;
-  $('setup-command').textContent = `curl -fsSL https://github.com/axAilotl/script-monkey/releases/download/v0.1.1/setup.sh | sh -s -- --browser ${browser}`;
+  $('setup-command').textContent = `curl -fsSL https://github.com/axAilotl/script-monkey/releases/download/v0.1.2/setup.sh | sh -s -- --browser ${browser}`;
 }
 
 function recoveryWarnings(warnings: string[] = []) {
@@ -113,6 +117,47 @@ function card(title: string, description: string, label: string, action: () => P
   button.addEventListener('click', () => { void action().catch(failed); });
   element.append(heading, text, button); return element;
 }
+function chatMessage(role: string, text: string, type = '') {
+  const element = document.createElement('div'); element.className = `message ${type}`;
+  const label = document.createElement('span'); label.className = 'role'; label.textContent = role;
+  const content = document.createElement('div'); content.textContent = text;
+  element.append(label, content); $('conversation').append(element);
+}
+function activity(value: AgentActivity) {
+  const conversation = $('conversation');
+  const follow = conversation.scrollTop + conversation.clientHeight >= conversation.scrollHeight - 50;
+  let element = activityElements.get(value.id);
+  if (!element) {
+    element = document.createElement(value.kind === 'source' ? 'details' : 'div');
+    element.className = `message activity ${value.kind}`;
+    const label = document.createElement(value.kind === 'source' ? 'summary' : 'span'); label.className = 'role';
+    const content = document.createElement(value.kind === 'source' ? 'pre' : 'div'); content.className = 'activity-content';
+    element.append(label, content); conversation.append(element); activityElements.set(value.id, element);
+    if (value.kind === 'source') (element as HTMLDetailsElement).open = value.state === 'running';
+  }
+  element.classList.toggle('failed', value.state === 'failed');
+  const label = element.querySelector<HTMLElement>('.role')!;
+  label.textContent = ({ source: 'Code · live preview', tool: 'Page inspection', message: 'Codex', summary: 'Codex summary', plan: 'Plan', status: 'Progress', command: 'Command' })[value.kind];
+  label.dataset.state = value.state === 'running' ? 'Working…' : value.state === 'failed' ? 'Failed' : 'Done';
+  const content = element.querySelector<HTMLElement>('.activity-content')!;
+  const followCode = content.scrollTop + content.clientHeight >= content.scrollHeight - 30;
+  content.textContent = value.text;
+  if (value.kind === 'source' && followCode) content.scrollTop = content.scrollHeight;
+  if (follow) conversation.scrollTop = conversation.scrollHeight;
+}
+function delivery() {
+  $('delivery').classList.toggle('hidden', !view);
+  if (!view) return;
+  const installed = view.project.appliedRevisionId === view.project.currentRevisionId;
+  const opened = installHandoffs.has(revision().id);
+  const status = installed ? 'Source verified in Tampermonkey' : opened ? 'Installer opened · installation not verified' : view.project.appliedRevisionId ? 'New draft saved · source not verified' : 'Draft saved · installation unverified';
+  const help = installed ? 'Reload the website and test the change.' : opened ? 'Finish Install / Update in your manager, then reload the website.' : 'Install or update this code in your manager before reloading.';
+  $('delivery-status').textContent = status; $('delivery-help').textContent = help;
+  $('library-delivery').textContent = `${status}. ${help}`;
+  $('chat-install').textContent = view.project.manager ? 'Update Tampermonkey' : 'Install in manager';
+  $('chat-install').classList.toggle('hidden', installed);
+  $('chat-reload').classList.toggle('hidden', !installed && !opened);
+}
 async function projects() {
   const list = await request<Project[]>({ method: 'projects' });
   const select = $<HTMLSelectElement>('projects'); select.replaceChildren(new Option('New customization', ''));
@@ -148,13 +193,16 @@ function render(value: ProjectView) {
   $('diff').textContent = changes(view.project.manager?.source ?? previous?.source ?? '', current.source);
   $('apply').toggleAttribute('disabled', !view.project.manager || busy);
   $('conversation').replaceChildren();
-  for (const event of value.events.filter(event => ['user', 'assistant', 'error'].includes(event.type)).slice(-30)) {
-    const element = document.createElement('div'); element.className = `message ${event.type}`;
-    const role = document.createElement('span'); role.className = 'role'; role.textContent = event.type === 'user' ? 'You' : event.type === 'assistant' ? 'Codex' : 'Task interrupted';
-    element.append(role, document.createTextNode(event.text)); $('conversation').append(element);
+  activityElements.clear();
+  for (const event of value.events.filter(event => ['user', 'assistant', 'error', 'activity'].includes(event.type)).slice(-60)) {
+    if (event.type === 'activity') {
+      try { const item = JSON.parse(event.text) as AgentActivity; if (['status', 'message', 'tool', 'summary', 'plan', 'command'].includes(item.kind)) activity({ ...item, id: `${event.at}:${item.id}` }); } catch { /* A damaged activity line must not hide saved code. */ }
+    } else chatMessage(event.type === 'user' ? 'You' : event.type === 'assistant' ? 'Codex' : 'Task interrupted', event.text, event.type);
   }
+  if (value.project.id === liveProjectId && liveSource) activity(liveSource);
   if (!$('conversation').childElementCount) $('conversation').append(card('Ready to customize', 'Describe a change below. Existing source is kept in the revision history.', 'Inspect current page', inspect));
   $('conversation').scrollTop = $('conversation').scrollHeight;
+  delivery();
   $('revisions').replaceChildren();
   for (const item of view.revisions) {
     const installed = item.id === view.project.appliedRevisionId ? ' · source verified in manager' : '';
@@ -171,7 +219,7 @@ async function saved() {
 }
 function setBusy(value: boolean) {
   busy = value;
-  for (const id of ['generate', 'new', 'save', 'install', 'apply', 'projects']) $(id).toggleAttribute('disabled', value || (id === 'apply' && !view?.project.manager));
+  for (const id of ['generate', 'new', 'save', 'install', 'apply', 'projects', 'chat-install', 'chat-reload']) $(id).toggleAttribute('disabled', value || (id === 'apply' && !view?.project.manager));
   $('cancel').classList.toggle('hidden', !value);
 }
 async function checkSetup(): Promise<boolean> {
@@ -262,9 +310,17 @@ $('prompt-form').addEventListener('submit', event => {
     if (view && view.project.origin !== siteOrigin(capture.page.url)) view = undefined;
     if (!view) { render(await request({ method: 'create', origin: capture!.page.url, name: new URL(capture!.page.url).hostname + ' customization' })); await projects(); }
     await saved(); setBusy(true); notice('Working with Codex…');
+    liveProjectId = projectId(); liveSource = undefined; activityElements.clear();
+    show('chat');
+    chatMessage('You', prompt, 'user');
+    $('conversation').scrollTop = $('conversation').scrollHeight;
     try {
       const result = await message<ProjectView>({ action: 'request', request: { method: 'generate', projectId: projectId(), prompt, page: capture!.page, model: $<HTMLSelectElement>('model').value || undefined }, target: { tabId: capture!.tabId, url: capture!.page.url, documentId: capture!.documentId } });
-      render(result); $<HTMLTextAreaElement>('prompt').value = ''; show('library'); notice('Draft saved. Review it here, then install it in your manager.');
+      render(result); $<HTMLTextAreaElement>('prompt').value = ''; notice('Draft saved. Install or update it in your manager to change the website.');
+    } catch (error) {
+      // Keep streamed activity and the submitted request visible on failure.
+      chatMessage('Task interrupted', error instanceof Error ? error.message : String(error), 'error');
+      throw error;
     } finally { setBusy(false); }
   })().catch(failed);
 });
@@ -272,10 +328,18 @@ on('cancel', () => request({ method: 'cancel' }));
 on('save', async () => { await saved(); notice('Saved a new source revision on disk.'); });
 on('download', async () => { const value = await saved(); download(scriptFilename(), value.source); notice('Open the .user.js with your manager, or import it from its dashboard.'); });
 on('copy', async () => { const value = await saved(); await navigator.clipboard.writeText(value.source); notice('Copied. Paste into your userscript manager editor.'); });
-on('install', async () => { const value = await saved(); const result = await request<{ url: string }>({ method: 'install-url', projectId: projectId(), revisionId: value.id }); await chrome.tabs.create({ url: result.url }); notice('Install handoff opened. If no installer appears, download or copy the code.'); });
-on('apply', async () => { const value = await saved(); render(await request({ method: 'apply', projectId: projectId(), revisionId: value.id })); notice('Updated and read back from Tampermonkey. Reload the website to test it.'); });
+async function install() {
+  const value = await saved(); const result = await request<{ url: string }>({ method: 'install-url', projectId: projectId(), revisionId: value.id });
+  await chrome.tabs.create({ url: result.url }); installHandoffs.add(value.id); delivery();
+  notice('Finish Install / Update in your manager’s screen, then reload the website. If no installer appears, use Download or Copy in Scripts.');
+}
+async function apply() { const value = await saved(); render(await request({ method: 'apply', projectId: projectId(), revisionId: value.id })); notice('Updated and read back from Tampermonkey. Reload the website to test it.'); }
+on('install', install);
+on('apply', apply);
+on('chat-install', () => view?.project.manager ? apply() : install());
+on('chat-source', () => show('library'));
 on('verify', async () => { const value = await saved(); render(await request({ method: 'verify-install', projectId: projectId(), revisionId: value.id })); notice('Exact source verified in Tampermonkey. Page behavior still needs testing.'); });
-on('reload', async () => {
+async function reloadWebsite() {
   let tabId = projectTargets.get(projectId());
   if (!tabId) {
     const page = await inspect();
@@ -284,6 +348,7 @@ on('reload', async () => {
   }
   const tab = await chrome.tabs.get(tabId);
   if (siteOrigin(tab.url ?? '') !== view!.project.origin) throw new Error('The original website tab navigated away. Open the script’s website again.');
+  await chrome.tabs.update(tabId, { active: true });
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => { chrome.tabs.onUpdated.removeListener(listener); reject(new Error('Reload timed out. Inspect again after the page loads.')); }, 20_000);
     const listener = (id: number, info: chrome.tabs.OnUpdatedInfo) => { if (id === tabId && info.status === 'complete') { clearTimeout(timer); chrome.tabs.onUpdated.removeListener(listener); resolve(); } };
@@ -293,7 +358,9 @@ on('reload', async () => {
   captured = await message({ action: 'inspect', tabId });
   $('page-status').textContent = `${captured!.page.selectors.length} visible controls after reload.`;
   notice('Reloaded and inspected. Try the new behavior, then save a test note.');
-});
+}
+on('reload', reloadWebsite);
+on('chat-reload', reloadWebsite);
 on('check', async () => {
   const capture = await inspect(), note = window.prompt('What did you observe when testing the script?');
   if (!note) return;
@@ -328,10 +395,14 @@ $('file').addEventListener('change', () => { void (async () => {
   await projects(); show('chat'); $<HTMLInputElement>('file').value = ''; notice('Imported into your disk-backed project library.');
 })().catch(failed); });
 on('export', async () => { if (!await requireHelper()) return; const backup = await request({ method: 'export', projectId: projectId() }); download(`${view!.project.name.replace(/[^\w.-]/g, '_')}.script-monkey.json`, JSON.stringify(backup, null, 2), 'application/json'); notice('Portable backup exported with source history and conversation.'); });
-$('projects').addEventListener('change', () => { const id = $<HTMLSelectElement>('projects').value; if (!id) { view = undefined; $('draft').classList.add('hidden'); $('conversation').replaceChildren(); return; } if (id) void request<ProjectView>({ method: 'project', projectId: id }).then(render).catch(failed); });
+$('projects').addEventListener('change', () => { const id = $<HTMLSelectElement>('projects').value; if (!id) { view = undefined; $('draft').classList.add('hidden'); $('conversation').replaceChildren(); delivery(); return; } if (id) void request<ProjectView>({ method: 'project', projectId: id }).then(render).catch(failed); });
 for (const button of document.querySelectorAll<HTMLElement>('[data-view]')) button.addEventListener('click', () => show(button.dataset.view!));
 chrome.runtime.onMessage.addListener(message => {
   if (message.event === 'progress') notice(message.text);
+  if (message.event === 'activity' && message.projectId === view?.project.id) {
+    if (message.activity.kind === 'source') { liveProjectId = message.projectId; liveSource = message.activity; }
+    activity(message.activity);
+  }
   if (message.event === 'connection-lost') missingHelper(message.reason);
 });
 chrome.tabs.onActivated.addListener(() => { void refreshPage(); });

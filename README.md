@@ -21,10 +21,10 @@ Setup locates the terminal’s Codex executable and records its absolute path so
 ## Use
 
 1. Open a website and the sidebar. Regular HTTP/HTTPS pages are detected and read automatically; the input stays visible in Chat. Chrome’s internal pages and Web Store do not allow extension inspection.
-2. Describe a change, such as “Add a top-right shortcut to the export menu.” Codex can request fresh DOM observations of that same document.
-3. Review the saved draft, site matches, grants, and source changes in Scripts.
-4. **Open install**, **Download .user.js**, or **Copy code** and complete your manager's confirmation screen.
-5. **Reload & inspect**, try the behavior, and **Save test note**. Continue in the same project. History restores earlier source as a new draft.
+2. Describe a change, such as “Add a top-right shortcut to the export menu.” Watch Codex’s messages, page reads, public summaries, commands when used, and live code in Chat. The input stays visible; source previews scroll separately. Codex can request fresh DOM observations of that same document.
+3. Completion stays in Chat. **View code** opens the saved draft, site matches, grants, and source changes in Scripts. Activity is kept with the project on disk.
+4. **Install in manager**, **Download .user.js**, or **Copy code** and complete your manager's confirmation screen. A paired, verified Tampermonkey script offers **Update Tampermonkey**. The sidebar distinguishes saved drafts, opened installers, and verified source.
+5. **Reload website** returns to the original website, reloads and inspects it. Try the behavior and **Save test note** in Scripts. Continue in the same project. History restores earlier source as a new draft.
 
 Generated code is never evaluated by Script Monkey. Opening an installer does not count as installation; source verification and behavior checks are separate.
 

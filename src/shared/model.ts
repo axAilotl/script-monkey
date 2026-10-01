@@ -41,5 +41,6 @@ export type Project = {
   manager?: ManagerBinding;
 };
 export type ProjectView = { project: Project; revisions: Revision[]; events: Event[]; warnings?: string[] };
-export type HostEvent = { event: 'progress'; text: string } | { event: 'inspect'; callId: string; selector: string; url: string };
+export type AgentActivity = { id: string; kind: 'status' | 'message' | 'source' | 'tool' | 'summary' | 'plan' | 'command'; text: string; state: 'running' | 'completed' | 'failed' };
+export type HostEvent = { event: 'progress'; text: string } | { event: 'activity'; projectId: string; activity: AgentActivity } | { event: 'inspect'; callId: string; selector: string; url: string };
 export type Reply = { id: string; result?: unknown; error?: string } | HostEvent;

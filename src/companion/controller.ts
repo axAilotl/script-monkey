@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
-import type { HostEvent, Page, Request } from '../shared/model.js';
+import type { AgentActivity, HostEvent, Page, Request } from '../shared/model.js';
 import { metadata, sameIdentity, siteOrigin, validateSource } from '../shared/userscript.js';
 import { Workspace, hash } from './store.js';
 import { Tampermonkey } from './manager.js';
@@ -12,10 +12,16 @@ export class Controller {
   private pageUrl = '';
   private pageCalls = new Map<string, { resolve: (page: Page) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>();
   private agent: Codex;
+  private activeProjectId?: string;
+  private activity = new Map<string, AgentActivity>();
   private server?: Server;
   private artifacts = new Map<string, string>();
   constructor(readonly store: Workspace, private readonly manager: Manager, private readonly emit: (event: HostEvent) => void) {
-    this.agent = new Codex(store.root, selector => this.inspect(selector), text => emit({ event: 'progress', text }));
+    this.agent = new Codex(store.root, selector => this.inspect(selector), text => emit({ event: 'progress', text }), undefined, activity => {
+      if (!this.activeProjectId) return;
+      if (activity.kind !== 'source' && (this.activity.has(activity.id) || this.activity.size < 100)) this.activity.set(activity.id, activity);
+      emit({ event: 'activity', projectId: this.activeProjectId, activity });
+    });
   }
   private inspect(selector: string): Promise<Page> {
     const callId = randomUUID();
@@ -95,17 +101,18 @@ export class Controller {
         const project = await this.store.project(request.projectId);
         if (siteOrigin(request.page.url) !== project.origin) throw new Error('This project belongs to another website. Select a matching project.');
         const revision = await this.store.revision(project.id, project.currentRevisionId!);
-        this.generating = true; this.pageUrl = request.page.url;
+        this.generating = true; this.pageUrl = request.page.url; this.activeProjectId = project.id; this.activity.clear();
         try {
           await this.store.event(project.id, 'user', request.prompt);
           const result = await this.agent.generate(project, request.prompt, request.page, revision.source, async threadId => this.store.update({ ...await this.store.project(project.id), threadId }), request.model);
           validateSource(result.source);
           if (project.manager && !sameIdentity(project.manager.source, result.source)) throw new Error('Codex changed the installed script identity. Save a personal fork instead of overwriting it.');
+          await this.saveActivity(project.id);
           const view = await this.store.save(project.id, result.source, result.explanation);
           await this.store.event(project.id, 'assistant', result.explanation, view.project.currentRevisionId);
           return this.store.view(project.id);
-        } catch (error) { await this.store.event(project.id, 'error', String(error)); throw error; }
-        finally { this.generating = false; this.pageUrl = ''; }
+        } catch (error) { await this.saveActivity(project.id); await this.store.event(project.id, 'error', String(error)); throw error; }
+        finally { this.generating = false; this.pageUrl = ''; this.activeProjectId = undefined; }
       }
       case 'apply': {
         const project = await this.store.project(request.projectId);
@@ -141,6 +148,10 @@ export class Controller {
       case 'export': return this.store.backup(request.projectId);
       case 'import-backup': return this.store.restore(request.backup);
     }
+  }
+  private async saveActivity(projectId: string) {
+    for (const activity of this.activity.values()) await this.store.event(projectId, 'activity', JSON.stringify(activity));
+    this.activity.clear();
   }
   async close() {
     this.agent.close(); await this.manager.close(); this.server?.close();

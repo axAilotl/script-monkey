@@ -61,16 +61,48 @@ try {
   const website = await taskContext.newPage(); await website.goto(taskOrigin); await website.bringToFront();
   await sidebar.waitForFunction(() => document.getElementById('setup-status').textContent === 'Codex ready');
   assert.equal(await sidebar.locator('#helper-setup').isVisible(), false);
+  await sidebar.evaluate(() => { document.getElementById('prompt').value = 'Hold the task'; document.getElementById('prompt-form').requestSubmit(); });
+  await sidebar.waitForFunction(() => document.getElementById('conversation').textContent.includes('checking the export button'), undefined, { timeout: 5000 });
+  assert.ok(await sidebar.locator('#conversation').getByText('Hold the task', { exact: true }).count(), 'The submitted request is invisible while Codex works');
+  await sidebar.waitForFunction(() => /Read button.*Export/s.test(document.getElementById('conversation').textContent));
+  await sidebar.evaluate(() => document.getElementById('cancel').click());
+  await sidebar.waitForFunction(() => !document.getElementById('generate').disabled);
+  await sidebar.evaluate(() => {
+    window.liveSourceShown = false;
+    new MutationObserver(() => {
+      if (document.querySelector('.activity.source pre')?.textContent.includes('dataset.shortcut') && document.getElementById('generate').disabled) window.liveSourceShown = true;
+    }).observe(document.getElementById('conversation'), { childList: true, subtree: true, characterData: true });
+  });
   await sidebar.evaluate(() => { document.getElementById('prompt').value = 'Add an export shortcut'; document.getElementById('prompt-form').requestSubmit(); });
-  await sidebar.waitForFunction(() => document.getElementById('notice').textContent.includes('Draft saved. Review'));
+  await sidebar.waitForFunction(() => document.getElementById('notice').textContent.includes('Draft saved'));
+  assert.equal(await sidebar.evaluate(() => window.liveSourceShown), true, 'Source was not visible while Codex was still running');
+  assert.equal(await sidebar.locator('#chat').isVisible(), true, 'Completion unexpectedly navigated away from the conversation');
+  assert.match(await sidebar.locator('#delivery-status').textContent(), /installation unverified|source not verified/i, 'A saved draft looks as if it changed the website');
+  assert.equal(await sidebar.locator('#chat-install').isVisible(), true, 'The installation step is hidden away in another tab');
   const source = await sidebar.locator('#source').inputValue();
   assert.match(source, /dataset.shortcut/); assert.match(source, /script-monkey.local\//);
   const projects = await readdir(join(root, 'workspace/projects'));
   assert.equal(projects.length, 1);
   assert.match(await readFile(join(root, 'workspace/projects', projects[0], 'current.user.js'), 'utf8'), /dataset.shortcut/);
+  await sidebar.screenshot({ path: 'artifacts/sidebar-live-activity.png' });
+  const installerOpened = taskContext.waitForEvent('page');
+  await sidebar.evaluate(() => document.getElementById('chat-install').click());
+  const installer = await installerOpened; await installer.waitForLoadState();
+  assert.match(installer.url(), /customization\.user\.js$/);
+  assert.equal(await (await fetch(installer.url())).text(), source, 'Installer received a different revision');
+  assert.match(await sidebar.locator('#delivery-status').textContent(), /installation not verified/);
+  await sidebar.evaluate(() => document.getElementById('chat-reload').click());
+  await sidebar.waitForFunction(() => document.getElementById('notice').textContent.includes('Reloaded and inspected'));
+  const activeUrl = await sidebar.evaluate(async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0].url);
+  assert.equal(activeUrl, taskOrigin + '/', 'Reload did not return to the original website');
   // Reopen the panel: projects auto-load without a Connect button.
   await sidebar.reload(); await website.bringToFront();
   await sidebar.waitForFunction(() => document.querySelectorAll('#projects option').length === 2);
   assert.equal(await sidebar.locator('#setup-status').textContent(), 'Codex ready');
-  console.log('Automatic helper connection, UI generation, fresh page inspection, disk save, and panel reopening passed.');
+  assert.match(await sidebar.locator('#conversation').textContent(), /checking the export button/, 'Activity did not survive panel reopening');
+  console.log('Automatic helper connection, live Codex activity, UI generation, fresh page inspection, disk save, and panel reopening passed.');
+} catch (error) {
+  const panel = taskContext.pages().find(page => page.url().includes('/sidebar.html'));
+  if (panel) console.log('Sidebar at failure:', await panel.locator('#conversation').textContent(), await panel.locator('#notice').textContent());
+  throw error;
 } finally { await taskContext.close(); taskServer.close(); await rm(root, { recursive: true, force: true }); }

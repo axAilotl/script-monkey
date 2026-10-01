@@ -22,14 +22,32 @@ createInterface({ input: process.stdin }).on('line', line => {
     currentSource = inputSource ? inputSource.slice(0, inputSource.indexOf('// ==/UserScript==') + '// ==/UserScript=='.length) + '\ndocument.body.dataset.shortcut = "ready";' : source;
     send({ id: message.id, result: { turn: { id: 'turn-test' } } });
     send({ method: 'turn/started', params: { threadId: thread, turn: { id: 'turn-test' } } });
+    send({ method: 'item/reasoning/summaryTextDelta', params: { threadId: thread, itemId: 'summary-test', summaryIndex: 0, delta: 'Checking the page structure.' } });
+    send({ method: 'item/reasoning/textDelta', params: { threadId: thread, itemId: 'summary-test', delta: 'Private reasoning content must not be relayed.' } });
+    send({ method: 'item/completed', params: { threadId: thread, item: { id: 'summary-test', type: 'reasoning', summary: ['Checking the page structure.'], content: ['Private reasoning content must not be relayed.'] } } });
+    send({ method: 'item/started', params: { threadId: thread, item: { id: 'commentary-test', type: 'agentMessage', phase: 'commentary', text: '' } } });
+    send({ method: 'item/agentMessage/delta', params: { threadId: thread, itemId: 'commentary-test', delta: 'I am checking the export button before building your shortcut.' } });
+    send({ method: 'item/completed', params: { threadId: thread, item: { id: 'commentary-test', type: 'agentMessage', phase: 'commentary', text: 'I am checking the export button before building your shortcut.' } } });
     send({ id: 'inspection', method: 'item/tool/call', params: { threadId: thread, turnId: 'turn-test', tool: 'inspect_page', arguments: { selector: 'button' } } });
   }
   if (message.id === 'inspection' && !message.method && !hold) {
     if (!message.result?.success || !message.result.contentItems[0].text.includes('Export')) throw new Error('Missing page observation');
+    send({ method: 'item/started', params: { threadId: thread, item: { id: 'command-test', type: 'commandExecution', command: 'printf fixture', status: 'inProgress' } } });
+    send({ method: 'item/commandExecution/outputDelta', params: { threadId: thread, itemId: 'command-test', delta: 'fixture' } });
+    send({ method: 'item/completed', params: { threadId: thread, item: { id: 'command-test', type: 'commandExecution', command: 'printf fixture', aggregatedOutput: 'fixture', exitCode: 0, status: 'completed' } } });
     const text = JSON.stringify({ source: currentSource, explanation: 'Added a shortcut after inspecting the export button.' });
-    send({ method: 'item/agentMessage/delta', params: { threadId: thread, delta: text } });
-    send({ method: 'item/completed', params: { threadId: thread, item: { type: 'agentMessage', text } } });
-    send({ method: 'turn/completed', params: { threadId: thread, turn: { status: 'completed' } } });
+    send({ method: 'item/started', params: { threadId: thread, item: { id: 'draft-test', type: 'agentMessage', phase: 'final_answer', text: '' } } });
+    // Split inside a JSON escape: clients must decode source progressively, not
+    // show the raw envelope or mix the commentary into the final draft.
+    const split = text.indexOf('\\n') + 1;
+    send({ method: 'item/agentMessage/delta', params: { threadId: thread, itemId: 'draft-test', delta: text.slice(0, split) } });
+    setTimeout(() => {
+      send({ method: 'item/agentMessage/delta', params: { threadId: thread, itemId: 'draft-test', delta: text.slice(split) } });
+      setTimeout(() => {
+        send({ method: 'item/completed', params: { threadId: thread, item: { id: 'draft-test', type: 'agentMessage', phase: 'final_answer', text } } });
+        send({ method: 'turn/completed', params: { threadId: thread, turn: { status: 'completed' } } });
+      }, 150);
+    }, 150);
   }
   if (message.method === 'turn/interrupt') { send({ id: message.id, result: {} }); send({ method: 'turn/completed', params: { threadId: thread, turn: { status: 'interrupted' } } }); }
 });
