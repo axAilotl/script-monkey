@@ -11,6 +11,7 @@ The user wants an open-source Chrome sidebar connected to existing Codex CLI. It
 - Preserve installed script identity and attribution. External manager edits stop an overwrite until source is refreshed.
 - Bind agent inspection to the original tab/document, preventing tab switches or navigation from silently redirecting tasks.
 - Preserve project context across page reloads and panel reopening. Saved drafts survive companion disconnection.
+- Keep Chat focused on an always-visible input. Put connection, model, page access, and manager pairing controls in Settings. Detect the current page and local helper automatically; missing setup must show instructions inside the running sidebar.
 - Distribute runnable source and packaged releases through GitHub with documented setup.
 
 The first release uses manual behavior checks. Automated click testing, workflow recording, Firefox, Windows, and other providers are later work.

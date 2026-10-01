@@ -11,11 +11,10 @@ try {
   const page = await context.newPage();
   await page.setViewportSize({ width: 400, height: 900 });
   await page.goto('chrome-extension://headnlhmjdmmncmbgnepdopknidmoile/sidebar.html');
-  await page.getByRole('button', { name: 'Connect', exact: true }).click();
-  await page.getByText('Local companion connected.', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Codex ready', exact: true }).waitFor();
   await mkdir('artifacts', { recursive: true });
   await page.screenshot({ path: 'artifacts/sidebar.png' });
-  console.log(JSON.stringify({ success: true, codexStatus: await page.locator('#connection-status').textContent(), modelOptions: await page.locator('#model option').count() }));
+  console.log(JSON.stringify({ success: true, codexStatus: await page.locator('#codex-status').textContent(), modelOptions: await page.locator('#model option').count() }));
 } finally {
   await context.close(); await rm(root, { recursive: true, force: true });
 }

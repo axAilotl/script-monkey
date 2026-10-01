@@ -1,17 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Script Monkey",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Build and maintain ordinary userscripts with your local Codex CLI and existing userscript manager.",
   "permissions": [
     "sidePanel",
-    "activeTab",
+    "tabs",
     "scripting",
-    "nativeMessaging"
-  ],
-  "optional_host_permissions": [
-    "http://*/*",
-    "https://*/*"
+    "nativeMessaging",
+    "storage"
   ],
   "background": {
     "service_worker": "worker.js",
@@ -26,5 +23,9 @@
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'none'"
   },
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuZ1SB+/OnxHbWt7xdSywBVpin+KfwksDFCBSfPoQxW8vE2FQygxmc2k7393EIXRbS4+DE3Ci8UknOHpHlGUeDxMe7pQnrFMKVULp7ZfhuNYG0UHdoG+ixu3RfuodToYFda6stqq19Rq4Ags88u24Pdawy2kidn1YQMcZhBqS8qlnhuNqsuOrHtE/R7n5exReD4bQQRxpt2OFsw9o8NTzekySExg0um8/C/j36ZJNcFgDToBh3Y3sCByulS7qOgfU3N8n7vLJUntsVkaAgYsQhHbaFlKHZQ6dhC7rUXQgWTq0tMaV/jWSq+GC1M3qe66MX7+NPaLJVmsoCkq/3y2WBwIDAQAB"
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuZ1SB+/OnxHbWt7xdSywBVpin+KfwksDFCBSfPoQxW8vE2FQygxmc2k7393EIXRbS4+DE3Ci8UknOHpHlGUeDxMe7pQnrFMKVULp7ZfhuNYG0UHdoG+ixu3RfuodToYFda6stqq19Rq4Ags88u24Pdawy2kidn1YQMcZhBqS8qlnhuNqsuOrHtE/R7n5exReD4bQQRxpt2OFsw9o8NTzekySExg0um8/C/j36ZJNcFgDToBh3Y3sCByulS7qOgfU3N8n7vLJUntsVkaAgYsQhHbaFlKHZQ6dhC7rUXQgWTq0tMaV/jWSq+GC1M3qe66MX7+NPaLJVmsoCkq/3y2WBwIDAQAB",
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ]
 }

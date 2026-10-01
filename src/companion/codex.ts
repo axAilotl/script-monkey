@@ -82,7 +82,7 @@ export class Codex {
       });
       this.process.on('error', error => { this.ready = undefined; this.fail(new Error(`Could not start Codex CLI: ${error.message}`)); });
       this.process.on('exit', () => { this.ready = undefined; this.fail(new Error('Codex CLI disconnected. Saved drafts are still on disk.')); });
-      await this.request('initialize', { clientInfo: { name: 'script_monkey', title: 'Script Monkey', version: '0.1.0' }, capabilities: { experimentalApi: true } });
+      await this.request('initialize', { clientInfo: { name: 'script_monkey', title: 'Script Monkey', version: '0.1.1' }, capabilities: { experimentalApi: true } });
       this.send({ method: 'initialized', params: {} });
     })().catch(error => { this.process?.kill(); this.ready = undefined; throw error; });
     return this.ready;
@@ -91,7 +91,13 @@ export class Codex {
     await this.start();
     const account = await this.request('account/read', {});
     const models = await this.request('model/list', {});
-    return { ...account, models: models.data.map((item: any) => ({ model: item.model, name: item.displayName ?? item.model })) };
+    const settings = await this.request('config/read', { includeLayers: false });
+    const configuredModel = settings.config?.model;
+    const unlisted = configuredModel && !models.data.some((item: any) => item.model === configuredModel);
+    const suggestedModel = account.account?.type === 'chatgpt' && unlisted
+      ? (models.data.find((item: any) => item.model === 'gpt-5.5') ?? models.data.find((item: any) => item.isDefault))?.model
+      : undefined;
+    return { ...account, configuredModel, suggestedModel, models: models.data.map((item: any) => ({ model: item.model, name: item.displayName ?? item.model })) };
   }
   async generate(project: Project, prompt: string, page: Page, source: string, saveThread: (id: string) => Promise<void>, model = process.env.SCRIPT_MONKEY_MODEL) {
     if (this.active) throw new Error('A Codex task is already running.');

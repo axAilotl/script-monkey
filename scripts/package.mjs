@@ -12,7 +12,7 @@ async function add(path) {
 }
 await add('dist');
 await add('docs');
-for (const name of ['README.md', 'LICENSE', 'scripts/setup.mjs']) files[`script-monkey/${name}`] = new Uint8Array(await readFile(name));
+for (const name of ['README.md', 'LICENSE', 'scripts/setup.mjs', 'scripts/install.sh']) files[`script-monkey/${name}`] = new Uint8Array(await readFile(name));
 await mkdir('artifacts', { recursive: true });
 await writeFile(`artifacts/script-monkey-${version}.zip`, zipSync(files));
 console.log(`Packaged artifacts/script-monkey-${version}.zip`);

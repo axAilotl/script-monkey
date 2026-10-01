@@ -3,10 +3,42 @@ import { metadata, siteOrigin } from '../shared/userscript.js';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id)! as T;
 let view: ProjectView | undefined;
-let captured: { page: Page; tabId: number; documentId: string } | undefined;
+type Capture = { page: Page; tabId: number; documentId: string };
+let captured: Capture | undefined;
 let busy = false;
 let fileMode: 'script' | 'backup' = 'script';
 let libraryWarnings: string[] = [];
+let helperReady = false;
+let codexReady = false;
+let checkingSetup: Promise<boolean> | undefined;
+let windowId: number | undefined;
+let pageVersion = 0;
+const projectTargets = new Map<string, number>();
+type PageContext = { tabId: number; url: string; title: string; supported: boolean; reason?: string };
+const isMissingHelper = (error: unknown) => /native messaging host.*not found|specified native messaging|access to the specified native messaging host|disconnected port/i.test(String(error));
+function failed(error: unknown) {
+  if (isMissingHelper(error)) {
+    missingHelper(error); show('settings');
+    notice('Install the local helper using the command here, then click Check setup again.', true);
+  } else if (/model.*not supported|model.*not available/i.test(String(error))) {
+    show('settings'); $('model').scrollIntoView({ block: 'center' });
+    notice('That model is not available with your Codex login. Choose another model here, then retry your message in Chat.', true);
+    $('connection-error').textContent = String(error);
+  } else notice(error instanceof Error ? error.message : String(error), true);
+}
+function missingHelper(error: unknown) {
+  helperReady = false; codexReady = false;
+  $('setup-status').textContent = 'Finish setup'; $('setup-status').classList.remove('ready');
+  $('setup-hint').classList.remove('hidden'); $('helper-setup').classList.remove('hidden');
+  $('connection-status').textContent = 'The local helper is not installed for this browser yet.';
+  $('connection-error').textContent = String(error);
+  $('codex-status').textContent = 'Install the helper below so this sidebar can use your existing Codex login.';
+}
+function setupCommand() {
+  const browser = $<HTMLSelectElement>('browser').value;
+  $('setup-command').textContent = `curl -fsSL https://github.com/axAilotl/script-monkey/releases/download/v0.1.1/setup.sh | sh -s -- --browser ${browser}`;
+}
+
 function recoveryWarnings(warnings: string[] = []) {
   $('recovery-warning').textContent = [...libraryWarnings, ...warnings].join('\n');
   $('recovery-warning').classList.toggle('hidden', !$('recovery-warning').textContent);
@@ -19,7 +51,7 @@ async function message<T>(value: unknown): Promise<T> {
 }
 const request = <T>(value: Request) => message<T>({ action: 'request', request: value });
 function on(id: string, action: () => Promise<unknown> | unknown) {
-  $(id).addEventListener('click', () => { void Promise.resolve().then(action).catch(error => notice(error instanceof Error ? error.message : String(error), true)); });
+  $(id).addEventListener('click', () => { void Promise.resolve().then(action).catch(failed); });
 }
 function show(name: string) {
   for (const section of document.querySelectorAll<HTMLElement>('.view')) section.classList.toggle('hidden', section.id !== name);
@@ -31,19 +63,41 @@ function revision(): Revision {
   return value;
 }
 function projectId() { if (!view) throw new Error('Choose a project first.'); return view.project.id; }
-async function inspect(): Promise<typeof captured> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id || !tab.url) throw new Error('Open a regular website and click the extension icon.');
-  const origin = siteOrigin(tab.url);
-  const allowed = await chrome.permissions.contains({ origins: [`${origin}/*`] });
-  if (!allowed) {
-    const granted = await chrome.permissions.request({ origins: [`${origin}/*`] });
-    if (!granted) throw new Error('Page access was not granted.');
+async function context(): Promise<PageContext> {
+  return message({ action: 'page-context', windowId });
+}
+async function inspect(): Promise<Capture> {
+  captured = undefined;
+  const tab = await context();
+  if (!tab.supported) throw new Error(tab.reason);
+  const value = await message<Capture>({ action: 'inspect', tabId: tab.tabId });
+  captured = value;
+  $('site').textContent = new URL(value.page.url).host;
+  $('page-status').textContent = value.page.title || 'Page ready';
+  $('access-status').textContent = `Page read successfully: ${value.page.title || new URL(value.page.url).host}. ${value.page.selectors.length} visible controls found.`;
+  return value;
+}
+async function refreshPage() {
+  if (busy) return;
+  const version = ++pageVersion;
+  captured = undefined;
+  try {
+    const tab = await context();
+    if (version !== pageVersion) return;
+    $('site').textContent = tab.supported ? new URL(tab.url).host : 'This page is protected by Chrome';
+    $('page-status').textContent = tab.supported ? tab.title : '';
+    if (!tab.supported) { captured = undefined; $('access-status').textContent = tab.reason!; return; }
+    const value = await message<Capture>({ action: 'inspect', tabId: tab.tabId });
+    if (version !== pageVersion) return;
+    captured = value;
+    $('page-status').textContent = value.page.title || 'Page ready';
+    $('access-status').textContent = `${value.page.selectors.length} visible controls found. Page access is working.`;
+  } catch (error) {
+    if (version === pageVersion) {
+      $('access-status').textContent = `Page access is blocked. In Chrome’s extension menu, open Script Monkey → Site access → On all sites. ${String(error)}`;
+      $('page-status').textContent = 'Page access blocked · see Settings';
+    }
   }
-  captured = await message({ action: 'inspect', tabId: tab.id });
-  $('site').textContent = new URL(captured!.page.url).hostname;
-  $('page-status').textContent = `${captured!.page.title} · ${captured!.page.selectors.length} visible controls`;
-  return captured;
 }
 function download(filename: string, content: string, type = 'text/javascript') {
   const url = URL.createObjectURL(new Blob([content], { type }));
@@ -56,18 +110,19 @@ function card(title: string, description: string, label: string, action: () => P
   const heading = document.createElement('strong'); heading.textContent = title;
   const text = document.createElement('p'); text.textContent = description;
   const button = document.createElement('button'); button.textContent = label;
-  button.addEventListener('click', () => { void action().catch(error => notice(String(error), true)); });
+  button.addEventListener('click', () => { void action().catch(failed); });
   element.append(heading, text, button); return element;
 }
 async function projects() {
   const list = await request<Project[]>({ method: 'projects' });
-  const select = $<HTMLSelectElement>('projects'); select.replaceChildren(new Option('Choose or create a project', ''));
+  const select = $<HTMLSelectElement>('projects'); select.replaceChildren(new Option('New customization', ''));
   $('project-list').replaceChildren();
   for (const project of list) {
     select.add(new Option(`${new URL(project.origin).hostname} · ${project.name}`, project.id));
     $('project-list').append(card(project.name, project.origin, 'Open project', async () => { render(await request({ method: 'project', projectId: project.id })); show('chat'); }));
   }
   select.value = view?.project.id ?? '';
+  $('project-picker').classList.toggle('hidden', list.length === 0);
 }
 function changes(before: string, after: string): string {
   if (before === after) return 'No source changes.';
@@ -80,11 +135,13 @@ function changes(before: string, after: string): string {
 }
 function render(value: ProjectView) {
   view = value;
+  void chrome.storage.local.set({ lastProject: value.project.id });
+  if (captured && siteOrigin(captured.page.url) === value.project.origin) projectTargets.set(value.project.id, captured.tabId);
   recoveryWarnings(value.warnings);
   $<HTMLSelectElement>('projects').value = view.project.id;
   const current = revision();
   $<HTMLTextAreaElement>('source').value = current.source;
-  $<HTMLDetailsElement>('draft').open = true;
+  $('draft').classList.remove('hidden');
   const meta = metadata(current.source);
   $('script-meta').textContent = `Sites: ${[...(meta.match ?? []), ...(meta.include ?? [])].join(', ')}\nGrants: ${(meta.grant ?? ['unspecified (manager default)']).join(', ')}${meta.updateURL || meta.downloadURL ? '\nThis script has an upstream update URL. Manager updates can replace personal edits.' : ''}`;
   const previous = view.revisions.filter(item => item.id !== current.id)[0];
@@ -102,7 +159,7 @@ function render(value: ProjectView) {
   for (const item of view.revisions) {
     const installed = item.id === view.project.appliedRevisionId ? ' · source verified in manager' : '';
     $('revisions').append(card(new Date(item.createdAt).toLocaleString() + installed, item.note, 'Restore as draft', async () => {
-      render(await request({ method: 'restore', projectId: projectId(), revisionId: item.id })); show('chat'); notice('Previous code restored as a saved draft. Apply it through your manager.');
+      render(await request({ method: 'restore', projectId: projectId(), revisionId: item.id })); show('library'); notice('Previous code restored as a saved draft. Apply it through your manager.');
     }));
   }
   for (const check of view.events.filter(event => event.type === 'check').slice(-10)) $('revisions').append(card('Recorded page check', check.text, 'View script', async () => { show('chat'); }));
@@ -117,20 +174,76 @@ function setBusy(value: boolean) {
   for (const id of ['generate', 'new', 'save', 'install', 'apply', 'projects']) $(id).toggleAttribute('disabled', value || (id === 'apply' && !view?.project.manager));
   $('cancel').classList.toggle('hidden', !value);
 }
-on('connect', async () => {
-  notice('Connecting to your machine…');
-  const status = await request<{ workspace: string; codex: any; warnings: string[] }>({ method: 'status' });
-  libraryWarnings = status.warnings; recoveryWarnings(view?.warnings);
-  $('workspace').textContent = status.workspace;
-  const models = $<HTMLSelectElement>('model');
-  models.replaceChildren(new Option('Use CLI configuration', ''));
-  for (const model of status.codex.models ?? []) models.add(new Option(model.name, model.model));
-  $('connection-status').textContent = status.codex.error ? status.codex.error : status.codex.account ? 'Codex CLI connected using its existing sign-in.' : 'Codex CLI found. Sign in with codex login in your terminal first.';
-  await projects(); notice('Local companion connected.');
+async function checkSetup(): Promise<boolean> {
+  if (checkingSetup) return checkingSetup;
+  checkingSetup = (async () => {
+    $('setup-status').textContent = 'Checking setup…';
+    try {
+      const status = await request<{ workspace: string; codex: any; warnings: string[] }>({ method: 'status' });
+      helperReady = true; codexReady = !!status.codex.account && !status.codex.error;
+      libraryWarnings = status.warnings; recoveryWarnings(view?.warnings);
+      $('workspace').textContent = `Scripts are saved in ${status.workspace}`;
+      $('helper-setup').classList.toggle('hidden', !status.codex.error);
+      $('connection-status').textContent = 'Local helper installed and running. It starts automatically.';
+      $('connection-error').textContent = status.codex.error ?? '';
+      $('codex-status').textContent = status.codex.error ? `Codex could not start. Re-run the helper installer from a terminal where codex works. ${status.codex.error}` : codexReady ? `Connected using your existing Codex login.${status.codex.configuredModel ? ` CLI model: ${status.codex.configuredModel}.` : ''}` : 'Codex is installed but needs a login. Run codex login in your terminal, then Check setup again.';
+      $('setup-status').textContent = codexReady ? 'Codex ready' : 'Codex needs setup';
+      $('setup-status').classList.toggle('ready', codexReady);
+      $('setup-hint').classList.toggle('hidden', codexReady);
+      const models = $<HTMLSelectElement>('model'), selected = models.value;
+      models.replaceChildren(new Option('Use CLI configuration', ''));
+      for (const model of status.codex.models ?? []) models.add(new Option(model.name, model.model));
+      const preference = await chrome.storage.local.get('model');
+      models.value = typeof preference.model === 'string' ? preference.model : status.codex.suggestedModel ?? selected;
+      if (codexReady && status.codex.suggestedModel && typeof preference.model !== 'string') $('codex-status').textContent += ` This sidebar will use ${status.codex.suggestedModel} because the configured model is not in Codex's available list. You can change this below.`;
+      await projects();
+      const previous = await chrome.storage.local.get('lastProject');
+      if (!view && typeof previous.lastProject === 'string' && [...$<HTMLSelectElement>('projects').options].some(option => option.value === previous.lastProject)) render(await request({ method: 'project', projectId: previous.lastProject }));
+      return codexReady;
+    } catch (error) {
+      missingHelper(error);
+      if (!isMissingHelper(error)) $('connection-status').textContent = 'The local helper could not start. Reinstall it with the command below.';
+      return false;
+    }
+  })().finally(() => { checkingSetup = undefined; });
+  return checkingSetup;
+}
+async function requireHelper() {
+  if (!helperReady && !await checkSetup()) {
+    show('settings'); notice('Run the setup command here once. Your message is kept in Chat.', true);
+    return false;
+  }
+  return true;
+}
+on('connect', async () => { if (await checkSetup()) notice('Codex is ready. Return to Chat and describe your change.'); else notice('Follow the setup steps shown here.', true); });
+on('setup-status', () => show('settings'));
+on('open-setup', () => show('settings'));
+on('copy-setup', async () => { await navigator.clipboard.writeText($('setup-command').textContent!); notice('Copied. Run it in your terminal, then click Check setup again.'); });
+$('browser').addEventListener('change', setupCommand);
+on('manager-setup', () => { show('settings'); $('manager-settings').scrollIntoView({ block: 'start' }); });
+on('pair', async () => {
+  if (!await requireHelper()) return;
+  notice('Getting a code from the local Tampermonkey bridge…');
+  const result = await request<{ code: string }>({ method: 'pair' });
+  $('pair-code').textContent = result.code; $('pair-code').classList.remove('hidden');
+  $('manager-status').textContent = 'Code ready. Paste it into Tampermonkey Editors, then Check pairing.';
+  notice('Pairing code ready. The steps are shown above it.');
 });
-on('pair', async () => { const result = await request<{ code: string }>({ method: 'pair' }); $('pair-code').textContent = result.code; $<HTMLDetailsElement>('connection').open = true; notice('Enter this code in Tampermonkey Editors. Keep the companion connected.'); });
+on('check-pair', async () => {
+  if (!await requireHelper()) return;
+  try {
+    const scripts = await request<ManagerScript[]>({ method: 'manager-list' });
+    $('manager-status').textContent = `Tampermonkey connected. ${scripts.length} installed scripts available in Scripts.`;
+    notice('Tampermonkey pairing works.');
+  } catch (error) {
+    $('manager-status').textContent = 'Not connected yet. Keep Editors open and paste the pairing code from this sidebar into its MCP connection field.';
+    $('connection-error').textContent = String(error);
+    notice('Pairing is not finished. Follow the three steps above.', true);
+  }
+});
 on('inspect', inspect);
 on('new', async () => {
+  if (!await requireHelper()) return;
   const capture = await inspect();
   const name = window.prompt('Name this customization', 'My website shortcut');
   if (!name?.trim()) return;
@@ -143,14 +256,17 @@ $('prompt-form').addEventListener('submit', event => {
   void (async () => {
     const prompt = $<HTMLTextAreaElement>('prompt').value.trim();
     if (!prompt) return;
+    if (!await requireHelper()) return;
+    if (!codexReady) { show('settings'); notice('Finish the Codex setup shown here. Your message is kept in Chat.', true); return; }
     const capture = await inspect();
+    if (view && view.project.origin !== siteOrigin(capture.page.url)) view = undefined;
     if (!view) { render(await request({ method: 'create', origin: capture!.page.url, name: new URL(capture!.page.url).hostname + ' customization' })); await projects(); }
     await saved(); setBusy(true); notice('Working with Codex…');
     try {
       const result = await message<ProjectView>({ action: 'request', request: { method: 'generate', projectId: projectId(), prompt, page: capture!.page, model: $<HTMLSelectElement>('model').value || undefined }, target: { tabId: capture!.tabId, url: capture!.page.url, documentId: capture!.documentId } });
-      render(result); $<HTMLTextAreaElement>('prompt').value = ''; notice('Draft saved on disk. Install or update it through your manager.');
+      render(result); $<HTMLTextAreaElement>('prompt').value = ''; show('library'); notice('Draft saved. Review it here, then install it in your manager.');
     } finally { setBusy(false); }
-  })().catch(error => notice(error instanceof Error ? error.message : String(error), true));
+  })().catch(failed);
 });
 on('cancel', () => request({ method: 'cancel' }));
 on('save', async () => { await saved(); notice('Saved a new source revision on disk.'); });
@@ -160,8 +276,14 @@ on('install', async () => { const value = await saved(); const result = await re
 on('apply', async () => { const value = await saved(); render(await request({ method: 'apply', projectId: projectId(), revisionId: value.id })); notice('Updated and read back from Tampermonkey. Reload the website to test it.'); });
 on('verify', async () => { const value = await saved(); render(await request({ method: 'verify-install', projectId: projectId(), revisionId: value.id })); notice('Exact source verified in Tampermonkey. Page behavior still needs testing.'); });
 on('reload', async () => {
-  if (!captured) await inspect();
-  const tabId = captured!.tabId;
+  let tabId = projectTargets.get(projectId());
+  if (!tabId) {
+    const page = await inspect();
+    if (siteOrigin(page.page.url) !== view!.project.origin) throw new Error('Switch to this script’s website before reloading it.');
+    tabId = page.tabId;
+  }
+  const tab = await chrome.tabs.get(tabId);
+  if (siteOrigin(tab.url ?? '') !== view!.project.origin) throw new Error('The original website tab navigated away. Open the script’s website again.');
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => { chrome.tabs.onUpdated.removeListener(listener); reject(new Error('Reload timed out. Inspect again after the page loads.')); }, 20_000);
     const listener = (id: number, info: chrome.tabs.OnUpdatedInfo) => { if (id === tabId && info.status === 'complete') { clearTimeout(timer); chrome.tabs.onUpdated.removeListener(listener); resolve(); } };
@@ -178,7 +300,16 @@ on('check', async () => {
   render(await request({ method: 'record-check', projectId: projectId(), revisionId: revision().id, page: capture!.page, note })); notice('Test observation saved with this revision.');
 });
 on('manager-list', async () => {
-  const scripts = await request<ManagerScript[]>({ method: 'manager-list' });
+  if (!await requireHelper()) return;
+  let scripts: ManagerScript[];
+  try { scripts = await request<ManagerScript[]>({ method: 'manager-list' }); }
+  catch (error) {
+    show('settings'); $('manager-settings').scrollIntoView({ block: 'start' });
+    $('manager-status').textContent = 'Tampermonkey is not connected yet. Install Editors, paste the pairing code, then Check pairing.';
+    $('connection-error').textContent = String(error);
+    notice('Finish the optional Tampermonkey pairing steps here to read installed scripts.', true);
+    return;
+  }
   $('manager-scripts').replaceChildren();
   for (const script of scripts) $('manager-scripts').append(card(script.name, script.namespace, 'Import / refresh source', async () => {
     const capture = await inspect();
@@ -186,8 +317,8 @@ on('manager-list', async () => {
   }));
   notice(`${scripts.length} existing scripts found in Tampermonkey.`);
 });
-on('import-script', () => { fileMode = 'script'; $<HTMLInputElement>('file').accept = '.js'; $<HTMLInputElement>('file').click(); });
-on('import-backup', () => { fileMode = 'backup'; $<HTMLInputElement>('file').accept = '.json'; $<HTMLInputElement>('file').click(); });
+on('import-script', async () => { if (!await requireHelper()) return; fileMode = 'script'; $<HTMLInputElement>('file').accept = '.js'; $<HTMLInputElement>('file').click(); });
+on('import-backup', async () => { if (!await requireHelper()) return; fileMode = 'backup'; $<HTMLInputElement>('file').accept = '.json'; $<HTMLInputElement>('file').click(); });
 $('file').addEventListener('change', () => { void (async () => {
   const file = $<HTMLInputElement>('file').files?.[0]; if (!file) return;
   if (file.size > 32 * 1024 * 1024) throw new Error('Import exceeds 32 MB.');
@@ -195,9 +326,23 @@ $('file').addEventListener('change', () => { void (async () => {
   if (fileMode === 'backup') render(await request({ method: 'import-backup', backup: JSON.parse(text) }));
   else { const capture = await inspect(); render(await request({ method: 'create', origin: capture!.page.url, name: metadata(text).name?.[0] ?? file.name, source: text })); }
   await projects(); show('chat'); $<HTMLInputElement>('file').value = ''; notice('Imported into your disk-backed project library.');
-})().catch(error => notice(String(error), true)); });
-on('export', async () => { const backup = await request({ method: 'export', projectId: projectId() }); download(`${view!.project.name.replace(/[^\w.-]/g, '_')}.script-monkey.json`, JSON.stringify(backup, null, 2), 'application/json'); notice('Portable backup exported with source history and conversation.'); });
-$('projects').addEventListener('change', () => { const id = $<HTMLSelectElement>('projects').value; if (id) void request<ProjectView>({ method: 'project', projectId: id }).then(render).catch(error => notice(String(error), true)); });
+})().catch(failed); });
+on('export', async () => { if (!await requireHelper()) return; const backup = await request({ method: 'export', projectId: projectId() }); download(`${view!.project.name.replace(/[^\w.-]/g, '_')}.script-monkey.json`, JSON.stringify(backup, null, 2), 'application/json'); notice('Portable backup exported with source history and conversation.'); });
+$('projects').addEventListener('change', () => { const id = $<HTMLSelectElement>('projects').value; if (!id) { view = undefined; $('draft').classList.add('hidden'); $('conversation').replaceChildren(); return; } if (id) void request<ProjectView>({ method: 'project', projectId: id }).then(render).catch(failed); });
 for (const button of document.querySelectorAll<HTMLElement>('[data-view]')) button.addEventListener('click', () => show(button.dataset.view!));
-chrome.runtime.onMessage.addListener(message => { if (message.event === 'progress') notice(message.text); });
-void chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => { if (tab?.url?.startsWith('http')) $('site').textContent = new URL(tab.url).hostname; });
+chrome.runtime.onMessage.addListener(message => {
+  if (message.event === 'progress') notice(message.text);
+  if (message.event === 'connection-lost') missingHelper(message.reason);
+});
+chrome.tabs.onActivated.addListener(() => { void refreshPage(); });
+chrome.tabs.onUpdated.addListener((_id, info) => { if (info.status === 'complete' || info.url) void refreshPage(); });
+void (async () => {
+  windowId = (await chrome.windows.getCurrent()).id;
+  const brands: { brand: string }[] = (navigator as any).userAgentData?.brands ?? [];
+  $<HTMLSelectElement>('browser').value = /Edg\//.test(navigator.userAgent) ? 'edge' : (navigator as any).brave ? 'brave' : brands.some(item => item.brand === 'Google Chrome') ? 'chrome' : 'chromium';
+  setupCommand();
+  const settings = await chrome.storage.local.get(['model']);
+  await Promise.all([refreshPage(), checkSetup()]);
+  if (typeof settings.model === 'string') $<HTMLSelectElement>('model').value = settings.model;
+})().catch(failed);
+$('model').addEventListener('change', () => { void chrome.storage.local.set({ model: $<HTMLSelectElement>('model').value }); });

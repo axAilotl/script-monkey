@@ -1,5 +1,6 @@
 import type { Request, Reply } from '../shared/model.js';
 import { inspectPage } from './inspector.js';
+import { siteOrigin } from '../shared/userscript.js';
 
 const HOST = 'io.github.script_monkey';
 let native: chrome.runtime.Port | undefined;
@@ -40,9 +41,9 @@ function connect() {
   native.onDisconnect.addListener(() => {
     const reason = chrome.runtime.lastError?.message ?? 'Local companion disconnected.';
     native = undefined; chunks.clear();
-    for (const entry of waiting.values()) { clearTimeout(entry.timer); entry.reject(new Error(`${reason} Run the local setup command from the README.`)); }
+    for (const entry of waiting.values()) { clearTimeout(entry.timer); entry.reject(new Error(reason)); }
     waiting.clear();
-    void publish({ event: 'progress', text: 'Disconnected. Your saved projects remain on disk.' });
+    void publish({ event: 'connection-lost', reason });
   });
   return native;
 }
@@ -55,13 +56,24 @@ function call(request: Request): Promise<unknown> {
     catch (error) { clearTimeout(timer); waiting.delete(id); reject(error); }
   });
 }
-chrome.runtime.onInstalled.addListener(() => { void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }); });
+// An action click opens the global panel; it never toggles it closed or changes pinning.
+void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
+chrome.action.onClicked.addListener(tab => { void chrome.sidePanel.open({ windowId: tab.windowId }); });
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id || !sender.url?.startsWith(chrome.runtime.getURL('sidebar.html'))) return;
   if (message.event) return;
   void (async () => {
+    if (message.action === 'page-context') {
+      const [tab] = await chrome.tabs.query({ active: true, ...(typeof message.windowId === 'number' ? { windowId: message.windowId } : { lastFocusedWindow: true }) });
+      if (!tab?.id || !tab.url) throw new Error('Chrome has not provided an active page yet.');
+      const url = new URL(tab.url);
+      const webStore = url.hostname === 'chromewebstore.google.com' || url.hostname === 'chrome.google.com' && url.pathname.startsWith('/webstore');
+      const supported = ['http:', 'https:'].includes(url.protocol) && !webStore;
+      return { tabId: tab.id, url: tab.url, title: tab.title ?? '', supported, reason: supported ? undefined : 'Chrome blocks extensions on this page. Switch to a regular website; the sidebar will follow automatically.' };
+    }
     if (message.action === 'inspect') {
       const tab = await chrome.tabs.get(message.tabId);
+      siteOrigin(tab.url ?? '');
       const result = await chrome.scripting.executeScript({ target: { tabId: tab.id! }, func: inspectPage, args: [message.selector ?? ''] });
       const first = result[0];
       if (!first?.result || !first.documentId) throw new Error('Could not inspect this page.');
